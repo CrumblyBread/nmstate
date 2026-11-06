@@ -115,6 +115,16 @@ impl OvsBridgeInterface {
         &mut self,
         is_desired: bool,
     ) -> Result<(), NmstateError> {
+        self.sanitize_with_current(is_desired, None)
+    }
+
+    // `current` supplies tags the request omits. Apply preserves those
+    // omitted VLAN properties from the existing connection.
+    pub(crate) fn sanitize_with_current(
+        &mut self,
+        is_desired: bool,
+        current: Option<&Self>,
+    ) -> Result<(), NmstateError> {
         if let Some(mtu) = self.base.mtu.as_ref()
             && is_desired
         {
@@ -181,9 +191,13 @@ impl OvsBridgeInterface {
                                 ),
                             ));
                         }
-                        // NetworkManager omits tag 0, which clears the native
-                        // VLAN.
-                        if vlan_conf.tag.unwrap_or(0) == 0 {
+                        // An explicit tag, including 0, is the native VLAN.
+                        // A missing tag is valid only when this port already
+                        // has one, because apply keeps that current tag.
+                        let effective_tag = vlan_conf.tag.or_else(|| {
+                            current_port_vlan_tag(current, &port_conf.name)
+                        });
+                        if effective_tag.is_none() {
                             return Err(NmstateError::new(
                                 ErrorKind::InvalidArgument,
                                 format!(
@@ -295,6 +309,17 @@ impl OvsBridgeInterface {
             br_conf.ports = Some(new_ports);
         }
     }
+}
+
+fn current_port_vlan_tag(
+    current: Option<&OvsBridgeInterface>,
+    port_name: &str,
+) -> Option<u16> {
+    let ports = current?.bridge.as_ref()?.ports.as_ref()?;
+    ports
+        .iter()
+        .find(|port| port.name == port_name)
+        .and_then(|port| port.vlan.as_ref()?.tag)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]

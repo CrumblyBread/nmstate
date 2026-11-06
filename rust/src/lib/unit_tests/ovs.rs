@@ -597,7 +597,33 @@ fn test_ovs_bridge_vlan_native_mode_rejects_disabled_native() {
 
 #[test]
 fn test_ovs_bridge_vlan_native_mode_requires_tag() {
-    for yaml in [
+    for mode in ["native-tagged", "native-untagged"] {
+        let mut desired: OvsBridgeInterface = serde_yaml::from_str(&format!(
+            r"
+            name: br0
+            type: ovs-bridge
+            state: up
+            bridge:
+              port:
+                - name: eth1
+                  vlan:
+                    mode: {mode}
+                    enable-native: true
+            ",
+        ))
+        .unwrap();
+        let result = desired.sanitize(true);
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert_eq!(e.kind(), ErrorKind::InvalidArgument);
+            assert!(e.msg().contains("tag"));
+        }
+    }
+}
+
+#[test]
+fn test_ovs_bridge_vlan_native_mode_uses_current_tag() {
+    let current: Interface = serde_yaml::from_str(
         r"
         name: br0
         type: ovs-bridge
@@ -606,9 +632,12 @@ fn test_ovs_bridge_vlan_native_mode_requires_tag() {
           port:
             - name: eth1
               vlan:
-                mode: native-untagged
-                enable-native: true
+                mode: access
+                tag: 100
         ",
+    )
+    .unwrap();
+    let desired: Interface = serde_yaml::from_str(
         r"
         name: br0
         type: ovs-bridge
@@ -618,18 +647,58 @@ fn test_ovs_bridge_vlan_native_mode_requires_tag() {
             - name: eth1
               vlan:
                 mode: native-tagged
-                tag: 0
-                enable-native: true
         ",
-    ] {
-        let mut desired: OvsBridgeInterface =
-            serde_yaml::from_str(yaml).unwrap();
-        let result = desired.sanitize(true);
-        assert!(result.is_err());
-        if let Err(e) = result {
-            assert_eq!(e.kind(), ErrorKind::InvalidArgument);
-            assert!(e.msg().contains("tag"));
-        }
+    )
+    .unwrap();
+
+    let mut merged =
+        MergedInterface::new(Some(desired), Some(current)).unwrap();
+    merged.post_inter_ifaces_process(false).unwrap();
+
+    let Interface::OvsBridge(apply_iface) = merged.for_apply.unwrap() else {
+        panic!("Expecting an OVS bridge");
+    };
+    let vlan = apply_iface.port_confs()[0].vlan.as_ref().unwrap();
+    assert_eq!(vlan.mode.unwrap().to_string(), "native-tagged");
+    assert!(vlan.tag.is_none());
+}
+
+#[test]
+fn test_ovs_bridge_vlan_native_mode_missing_tag_without_current_tag() {
+    let current: Interface = serde_yaml::from_str(
+        r"
+        name: br0
+        type: ovs-bridge
+        state: up
+        bridge:
+          port:
+            - name: eth1
+              vlan:
+                mode: access
+        ",
+    )
+    .unwrap();
+    let desired: Interface = serde_yaml::from_str(
+        r"
+        name: br0
+        type: ovs-bridge
+        state: up
+        bridge:
+          port:
+            - name: eth1
+              vlan:
+                mode: native-tagged
+        ",
+    )
+    .unwrap();
+
+    let mut merged =
+        MergedInterface::new(Some(desired), Some(current)).unwrap();
+    let result = merged.post_inter_ifaces_process(false);
+    assert!(result.is_err());
+    if let Err(e) = result {
+        assert_eq!(e.kind(), ErrorKind::InvalidArgument);
+        assert!(e.msg().contains("tag"));
     }
 }
 

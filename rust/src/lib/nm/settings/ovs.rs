@@ -349,4 +349,36 @@ vlan:
             assert_eq!(trunks[1].end, 300);
         }
     }
+
+    #[test]
+    fn test_ovs_port_native_vlan_tag_zero_is_accepted_and_sent() {
+        for mode in ["native-tagged", "native-untagged"] {
+            let mut desired: OvsBridgeInterface =
+                serde_yaml::from_str(&format!(
+                    r#"
+name: br0
+type: ovs-bridge
+state: up
+bridge:
+  port:
+    - name: eth1
+      vlan:
+        mode: {mode}
+        tag: 0
+        enable-native: true
+"#
+                ))
+                .unwrap();
+
+            desired.sanitize(true).unwrap();
+            let ports = desired.port_confs();
+            let port = ports[0];
+            assert_eq!(port.vlan.as_ref().unwrap().tag, Some(0));
+            let conn =
+                create_ovs_port_nm_conn("br0", port, None, false).unwrap();
+            let ovs_port = conn.ovs_port.as_ref().unwrap();
+            assert_eq!(ovs_port.vlan_mode.as_deref(), Some(mode));
+            assert_eq!(ovs_port.tag, Some(0));
+        }
+    }
 }

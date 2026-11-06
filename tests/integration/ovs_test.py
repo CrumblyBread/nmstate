@@ -619,8 +619,16 @@ def test_ovs_vlan_native_modes(vlan_mode):
             .replace(" ", "")
             == "[200,300]"
         )
-        shown = statelib.show_only((BRIDGE1,))[Interface.KEY][0]
-        port_state = shown[OVSBridge.CONFIG_SUBTREE][OVSBridge.PORT_SUBTREE][0]
+        shown = next(
+            iface
+            for iface in statelib.show_only((BRIDGE1,))[Interface.KEY]
+            if iface[Interface.TYPE] == InterfaceType.OVS_BRIDGE
+        )
+        port_state = next(
+            port
+            for port in shown[OVSBridge.CONFIG_SUBTREE][OVSBridge.PORT_SUBTREE]
+            if port[OVSBridge.Port.NAME] == PORT1
+        )
         vlan_state = port_state[OVSBridge.Port.VLAN_SUBTREE]
         assert vlan_state[OVSBridge.Port.Vlan.MODE] == vlan_mode
         assert vlan_state[OVSBridge.Port.Vlan.TAG] == 100

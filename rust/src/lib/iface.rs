@@ -777,13 +777,27 @@ impl Interface {
         &mut self,
         is_desired: bool,
     ) -> Result<(), NmstateError> {
+        self.sanitize_with_current(is_desired, None)
+    }
+
+    pub(crate) fn sanitize_with_current(
+        &mut self,
+        is_desired: bool,
+        current: Option<&Self>,
+    ) -> Result<(), NmstateError> {
         self.base_iface_mut().sanitize(is_desired)?;
         match self {
             Interface::Ethernet(iface) => iface.sanitize()?,
             Interface::Hsr(iface) => iface.sanitize(is_desired)?,
             Interface::LinuxBridge(iface) => iface.sanitize(is_desired)?,
             Interface::OvsInterface(iface) => iface.sanitize(is_desired)?,
-            Interface::OvsBridge(iface) => iface.sanitize(is_desired)?,
+            Interface::OvsBridge(iface) => {
+                let current_br = match current {
+                    Some(Interface::OvsBridge(br)) => Some(br.as_ref()),
+                    _ => None,
+                };
+                iface.sanitize_with_current(is_desired, current_br)?;
+            }
             Interface::Vrf(iface) => iface.sanitize(is_desired)?,
             Interface::Bond(iface) => iface.sanitize()?,
             Interface::MacVlan(iface) => iface.sanitize(is_desired)?,
@@ -949,7 +963,7 @@ impl MergedInterface {
         }
 
         if let Some(apply_iface) = self.for_apply.as_mut() {
-            apply_iface.sanitize(true)?;
+            apply_iface.sanitize_with_current(true, self.current.as_ref())?;
         }
         Ok(())
     }
